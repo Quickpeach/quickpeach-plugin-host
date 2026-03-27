@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "QuickPeach's typed plugin host runtime and import model"
 license = "MIT"
+repository = "https://github.com/Quickpeach/quickpeach-plugin-host"
+homepage = "https://github.com/Quickpeach/quickpeach-plugin-host"
+documentation = "https://docs.rs/quickpeach-plugin-host"
 
 [dependencies]
-peachnote-vault-core = { version = "0.1.0", path = "../peachnote-vault-core" }
+peachnote-vault-core = { version = "0.1.0", git = "https://github.com/Quickpeach/quickpeach-vault-core.git", rev = "8d3d4d9435a8b0227562264403cce90f29562b4e" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"

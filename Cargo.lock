@@ -290,6 +290,7 @@ checksum = "c08d65885ee38876c4f86fa503fb49d7b507c2b62552df7c70b2fce627e06381"
 [[package]]
 name = "peachnote-vault-core"
 version = "0.1.0"
+source = "git+https://github.com/Quickpeach/quickpeach-vault-core.git?rev=8d3d4d9435a8b0227562264403cce90f29562b4e#8d3d4d9435a8b0227562264403cce90f29562b4e"
 dependencies = [
  "base64",
  "chacha20poly1305",

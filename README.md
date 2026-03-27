@@ -1,4 +1,4 @@
-# quickpeach-plugin-host
+# QuickPeach Plugin Host
 
 The plugin runtime foundation for QuickPeach. This Rust crate defines the contracts that QuickPeach and its plugins agree on -- manifest formats, permission checks, storage, and registration APIs.
 
@@ -23,25 +23,26 @@ This separation means:
 - **Plugin authors** target stable manifest, storage, and registration contracts that won't break between releases.
 - **The contracts stay inspectable** while the app shell and backend can remain proprietary.
 
-## Using the crate
+## Add it to your project
 
 This is a Rust library crate, so consumers normally add it as a dependency with
 `cargo add`, not `cargo install`.
 
-### Local workspace
+### Git dependency
+
+```bash
+cargo add quickpeach-plugin-host --git https://github.com/Quickpeach/quickpeach-plugin-host.git
+```
+
+### Cargo.toml
 
 ```toml
 [dependencies]
-peachnote-plugin-host = { path = "../peachnote-plugin-host" }
+quickpeach-plugin-host = { git = "https://github.com/Quickpeach/quickpeach-plugin-host.git" }
 ```
 
-Current packaging status:
-
-- local path usage works today
-- the crate is packageable as a library
-- publishing still requires the shared `peachnote-vault-core` dependency to be
-  available from the source you publish against, typically crates.io or a shared
-  git workspace
+This crate depends on `peachnote-vault-core`, so the Git-based install path is
+the simplest public option until both crates are on crates.io.
 
 ## Modules at a glance
 
