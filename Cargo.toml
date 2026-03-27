@@ -1,0 +1,15 @@
+[package]
+name = "quickpeach-plugin-host"
+version = "0.1.0"
+edition = "2021"
+description = "QuickPeach's typed plugin host runtime and import model"
+license = "MIT"
+
+[dependencies]
+peachnote-vault-core = { version = "0.1.0", path = "../peachnote-vault-core" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "2.0"
+
+[dev-dependencies]
+tempfile = "3.15"
