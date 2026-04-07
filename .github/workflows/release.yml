@@ -112,8 +112,8 @@ jobs:
           text = path.read_text(encoding="utf-8")
 
           text, n = re.subn(
-              r'(^|\n)(\[package\][\s\S]*?\nversion = ")([^"]+)(")',
-              rf'\1\2{os.environ["RELEASE_VERSION"]}\4',
+              r'((?:^|\n)\[package\][\s\S]*?\nversion = ")([^"]+)(")',
+              rf'\g<1>{os.environ["RELEASE_VERSION"]}\3',
               text, count=1,
           )
           if n != 1:
@@ -133,8 +133,7 @@ jobs:
           PY
 
       - name: Refresh Cargo.lock
-        if: steps.version.outputs.vault_core_version != ''
-        run: cargo update -p peachnote-vault-core --precise "${{ steps.version.outputs.vault_core_version }}"
+        run: cargo generate-lockfile
 
       - name: Check formatting
         run: cargo fmt --all --check
