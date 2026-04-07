@@ -41,7 +41,7 @@ jobs:
         id: version
         shell: bash
         run: |
-          CRATE_NAME="quickpeach-plugin-host"
+          export CRATE_NAME="quickpeach-plugin-host"
           LAST_TAG="$(git tag --list 'v*' --sort=-version:refname | head -n1)"
           LATEST_PUBLISHED="$(python - <<'PY'
           import json
@@ -129,8 +129,8 @@ jobs:
       - name: Update Cargo.toml for release
         shell: bash
         run: |
-          RELEASE_VERSION="${{ steps.version.outputs.release_version }}"
-          VAULT_CORE_VERSION="${{ steps.version.outputs.vault_core_version }}"
+          export RELEASE_VERSION="${{ steps.version.outputs.release_version }}"
+          export VAULT_CORE_VERSION="${{ steps.version.outputs.vault_core_version }}"
           python - <<'PY'
           import os
           import pathlib
