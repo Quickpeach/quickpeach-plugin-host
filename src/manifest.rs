@@ -287,9 +287,13 @@ pub enum ManifestValidationError {
     DuplicatePreference(String),
     #[error("view entry '{0}' must be a safe relative path inside the extension directory")]
     InvalidViewEntry(String),
-    #[error("platform view entry '{0}' must be a safe relative path inside the extension directory")]
+    #[error(
+        "platform view entry '{0}' must be a safe relative path inside the extension directory"
+    )]
     InvalidPlatformViewEntry(String),
-    #[error("platform asset path '{0}' must be a safe relative path inside the extension directory")]
+    #[error(
+        "platform asset path '{0}' must be a safe relative path inside the extension directory"
+    )]
     InvalidPlatformAssetPath(String),
     #[error("command '{command}' requires permission '{permission:?}'")]
     MissingPermission {

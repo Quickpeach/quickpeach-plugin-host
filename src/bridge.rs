@@ -417,16 +417,12 @@ impl BridgeRequest {
             | Self::StorageKeys { .. }
             | Self::StorageBlobList { .. }
             | Self::StorageBlobStat { .. }
-            | Self::CryptoOpen { .. } => {
-                Some(ExtensionPermission::StorageRead)
-            }
+            | Self::CryptoOpen { .. } => Some(ExtensionPermission::StorageRead),
             Self::StorageSet { .. }
             | Self::StorageBlobPut { .. }
             | Self::StorageRemove { .. }
             | Self::StorageBlobDelete { .. }
-            | Self::CryptoSeal { .. } => {
-                Some(ExtensionPermission::StorageWrite)
-            }
+            | Self::CryptoSeal { .. } => Some(ExtensionPermission::StorageWrite),
             Self::SecretGet { .. } | Self::SecretKeys { .. } => {
                 Some(ExtensionPermission::SecretsRead)
             }
@@ -443,9 +439,7 @@ impl BridgeRequest {
             Self::SearchFiles { .. } => Some(ExtensionPermission::SearchFiles),
             Self::CalendarListConnectors
             | Self::CalendarListSources
-            | Self::CalendarListEvents { .. } => {
-                Some(ExtensionPermission::CalendarRead)
-            }
+            | Self::CalendarListEvents { .. } => Some(ExtensionPermission::CalendarRead),
             Self::CalendarUpsertSource { .. } | Self::CalendarRemoveSource { .. } => {
                 Some(ExtensionPermission::CalendarWrite)
             }

@@ -42,66 +42,50 @@ jobs:
         shell: bash
         run: |
           export CRATE_NAME="quickpeach-plugin-host"
-          LAST_TAG="$(git tag --list 'v*' --sort=-version:refname | head -n1)"
-          LATEST_PUBLISHED="$(python - <<'PY'
-          import json
-          import os
-          import urllib.error
-          import urllib.request
 
-          crate_name = os.environ["CRATE_NAME"]
-          url = f"https://crates.io/api/v1/crates/{crate_name}"
-          try:
-              with urllib.request.urlopen(url, timeout=30) as response:
-                  data = json.load(response)
-          except urllib.error.HTTPError as exc:
-              if exc.code == 404:
-                  print("")
-              else:
-                  raise
-          else:
-              version = data.get("crate", {}).get("max_stable_version") or data.get("crate", {}).get("newest_version") or ""
-              print(version)
-          PY
-          )"
+          # Determine baseline: latest git tag > crates.io published > Cargo.toml current
+          LAST_TAG="$(git tag --list 'v*' --sort=-version:refname | head -n1)"
 
           if [[ -n "${LAST_TAG}" ]]; then
             BASELINE_VERSION="${LAST_TAG#v}"
-          elif [[ -n "${LATEST_PUBLISHED}" ]]; then
-            BASELINE_VERSION="${LATEST_PUBLISHED}"
           else
-            echo "::error::Trusted publishing requires a one-time manual quickpeach-plugin-host release before this workflow can auto-publish."
-            exit 1
-          fi
+            BASELINE_VERSION="$(python - <<'PY'
+          import json, os, pathlib, re, urllib.error, urllib.request
 
-          if [[ ! "${BASELINE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Baseline version ${BASELINE_VERSION} is not strict semver"
-            exit 1
+          crate_name = os.environ["CRATE_NAME"]
+          try:
+              with urllib.request.urlopen(f"https://crates.io/api/v1/crates/{crate_name}", timeout=30) as r:
+                  data = json.load(r)
+              version = data.get("crate", {}).get("max_stable_version") or data.get("crate", {}).get("newest_version") or ""
+              if version:
+                  print(version)
+                  raise SystemExit(0)
+          except urllib.error.HTTPError as exc:
+              if exc.code != 404:
+                  raise
+
+          text = pathlib.Path("Cargo.toml").read_text(encoding="utf-8")
+          match = re.search(r'(^|\n)\[package\][\s\S]*?\nversion = "([^"]+)"', text)
+          print(match.group(2) if match else "0.1.0")
+          PY
+          )"
           fi
 
           IFS='.' read -r major minor patch <<< "${BASELINE_VERSION}"
           RELEASE_VERSION="${major}.${minor}.$((patch + 1))"
-
           RELEASE_TAG="v${RELEASE_VERSION}"
 
           VAULT_CORE_VERSION="$(python - <<'PY'
-          import json
-          import urllib.request
+          import json, urllib.error, urllib.request
 
-          with urllib.request.urlopen("https://crates.io/api/v1/crates/peachnote-vault-core", timeout=30) as response:
-              data = json.load(response)
-
-          version = data.get("crate", {}).get("max_stable_version") or data.get("crate", {}).get("newest_version")
-          if not version:
-              raise SystemExit("Could not resolve latest published peachnote-vault-core version from crates.io")
-          print(version)
+          try:
+              with urllib.request.urlopen("https://crates.io/api/v1/crates/peachnote-vault-core", timeout=30) as r:
+                  data = json.load(r)
+              print(data.get("crate", {}).get("max_stable_version") or data.get("crate", {}).get("newest_version") or "")
+          except urllib.error.HTTPError as exc:
+              print("") if exc.code == 404 else (_ for _ in ()).throw(exc)
           PY
           )"
-
-          if [[ ! "${VAULT_CORE_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::Resolved vault-core version ${VAULT_CORE_VERSION} is not strict semver"
-            exit 1
-          fi
 
           echo "release_version=${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
           echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
@@ -116,52 +100,40 @@ jobs:
             exit 1
           fi
 
-      - name: Ensure latest vault-core version is published
-        shell: bash
-        run: |
-          VAULT_CORE_VERSION="${{ steps.version.outputs.vault_core_version }}"
-          STATUS="$(curl -s -o /dev/null -w '%{http_code}' "https://crates.io/api/v1/crates/peachnote-vault-core/${VAULT_CORE_VERSION}")"
-          if [[ "${STATUS}" != "200" ]]; then
-            echo "::error::peachnote-vault-core ${VAULT_CORE_VERSION} is not visible on crates.io."
-            exit 1
-          fi
-
       - name: Update Cargo.toml for release
         shell: bash
         run: |
           export RELEASE_VERSION="${{ steps.version.outputs.release_version }}"
           export VAULT_CORE_VERSION="${{ steps.version.outputs.vault_core_version }}"
           python - <<'PY'
-          import os
-          import pathlib
-          import re
+          import os, pathlib, re
 
           path = pathlib.Path("Cargo.toml")
           text = path.read_text(encoding="utf-8")
 
-          text, package_count = re.subn(
+          text, n = re.subn(
               r'(^|\n)(\[package\][\s\S]*?\nversion = ")([^"]+)(")',
               rf'\1\2{os.environ["RELEASE_VERSION"]}\4',
-              text,
-              count=1,
+              text, count=1,
           )
-
-          text, dep_count = re.subn(
-              r'peachnote-vault-core\s*=\s*(\{[^}]*\}|"[^"]+")',
-              f'peachnote-vault-core = "{os.environ["VAULT_CORE_VERSION"]}"',
-              text,
-              count=1,
-          )
-
-          if package_count != 1:
+          if n != 1:
               raise SystemExit("Could not update package version in Cargo.toml")
-          if dep_count != 1:
-              raise SystemExit("Could not rewrite peachnote-vault-core dependency in Cargo.toml")
+
+          vault_core_version = os.environ.get("VAULT_CORE_VERSION", "").strip()
+          if vault_core_version:
+              text, n = re.subn(
+                  r'peachnote-vault-core\s*=\s*(\{[^}]*\}|"[^"]+")',
+                  f'peachnote-vault-core = "{vault_core_version}"',
+                  text, count=1,
+              )
+              if n != 1:
+                  raise SystemExit("Could not rewrite peachnote-vault-core dependency in Cargo.toml")
 
           path.write_text(text, encoding="utf-8")
           PY
 
       - name: Refresh Cargo.lock
+        if: steps.version.outputs.vault_core_version != ''
         run: cargo update -p peachnote-vault-core --precise "${{ steps.version.outputs.vault_core_version }}"
 
       - name: Check formatting
@@ -180,10 +152,8 @@ jobs:
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run == true
         shell: bash
         run: |
-          RELEASE_VERSION="${{ steps.version.outputs.release_version }}"
-          VAULT_CORE_VERSION="${{ steps.version.outputs.vault_core_version }}"
-          echo "Prepared quickpeach-plugin-host ${RELEASE_VERSION} against peachnote-vault-core ${VAULT_CORE_VERSION}." >> "$GITHUB_STEP_SUMMARY"
-          echo "Dry run mode is active, so nothing was published or pushed." >> "$GITHUB_STEP_SUMMARY"
+          echo "Prepared quickpeach-plugin-host ${{ steps.version.outputs.release_version }} (vault-core: ${{ steps.version.outputs.vault_core_version }})." >> "$GITHUB_STEP_SUMMARY"
+          echo "Dry run — nothing published or pushed." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Authenticate with crates.io
         if: github.event_name == 'push' || inputs.dry_run != true

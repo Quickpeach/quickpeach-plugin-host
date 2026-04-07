@@ -40,7 +40,8 @@ pub trait PluginStorage: Send + Sync {
     fn set(&mut self, extension_id: &str, key: &str, value: Value) -> Result<(), StorageError>;
     fn remove(&mut self, extension_id: &str, key: &str) -> Result<Option<Value>, StorageError>;
     fn keys(&self, extension_id: &str, prefix: Option<&str>) -> Result<Vec<String>, StorageError>;
-    fn get_blob(&self, extension_id: &str, path: &str) -> Result<Option<StorageBlob>, StorageError>;
+    fn get_blob(&self, extension_id: &str, path: &str)
+        -> Result<Option<StorageBlob>, StorageError>;
     fn put_blob(
         &mut self,
         extension_id: &str,
@@ -132,7 +133,11 @@ impl PluginStorage for InMemoryExtensionStore {
         Ok(keys)
     }
 
-    fn get_blob(&self, extension_id: &str, path: &str) -> Result<Option<StorageBlob>, StorageError> {
+    fn get_blob(
+        &self,
+        extension_id: &str,
+        path: &str,
+    ) -> Result<Option<StorageBlob>, StorageError> {
         let normalized = normalize_blob_path(path)?;
         Ok(self
             .blob_namespaces
@@ -240,10 +245,7 @@ impl DiskExtensionStore {
         self.namespace_dir(extension_id).join("blobs.json")
     }
 
-    fn read_namespace(
-        &self,
-        extension_id: &str,
-    ) -> Result<HashMap<String, Value>, StorageError> {
+    fn read_namespace(&self, extension_id: &str) -> Result<HashMap<String, Value>, StorageError> {
         let file = self.namespace_file(extension_id);
         if !file.exists() {
             return Ok(HashMap::new());
@@ -334,7 +336,11 @@ impl PluginStorage for DiskExtensionStore {
         Ok(keys)
     }
 
-    fn get_blob(&self, extension_id: &str, path: &str) -> Result<Option<StorageBlob>, StorageError> {
+    fn get_blob(
+        &self,
+        extension_id: &str,
+        path: &str,
+    ) -> Result<Option<StorageBlob>, StorageError> {
         let normalized = normalize_blob_path(path)?;
         let index = self.read_blob_index(extension_id)?;
         let Some(metadata) = index.get(&normalized).cloned() else {
@@ -534,14 +540,21 @@ mod tests {
             .expect("get blob")
             .expect("blob exists");
         assert_eq!(blob.bytes, b"hello world");
-        assert_eq!(blob.metadata.sync_class, StorageBlobSyncClass::CloudReplicated);
+        assert_eq!(
+            blob.metadata.sync_class,
+            StorageBlobSyncClass::CloudReplicated
+        );
 
         assert_eq!(
-            store.list_blobs("media-tools", Some("images")).expect("list"),
+            store
+                .list_blobs("media-tools", Some("images"))
+                .expect("list"),
             vec![metadata.clone()]
         );
         assert_eq!(
-            store.stat_blob("media-tools", "images/logo.png").expect("stat"),
+            store
+                .stat_blob("media-tools", "images/logo.png")
+                .expect("stat"),
             Some(metadata.clone())
         );
         assert!(store

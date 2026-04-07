@@ -351,10 +351,7 @@ pub struct OverlayRegistryPlan {
 }
 
 impl OverlayRegistryPlan {
-    pub fn register(
-        &mut self,
-        overlay: OverlayFamilyRegistration,
-    ) -> Result<(), RegistryError> {
+    pub fn register(&mut self, overlay: OverlayFamilyRegistration) -> Result<(), RegistryError> {
         if self.overlays.contains_key(&overlay.namespace) {
             return Err(RegistryError::DuplicateOverlayNamespace(
                 overlay.namespace.clone(),

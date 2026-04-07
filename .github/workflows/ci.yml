@@ -5,10 +5,23 @@ on:
     branches:
       - main
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
 
 jobs:
-  test-and-lint:
+  lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
@@ -26,7 +39,109 @@ jobs:
         run: cargo fmt --all --check
 
       - name: Lint
-        run: cargo clippy --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
 
-      - name: Test
-        run: cargo test
+  test-matrix:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run tests
+        run: cargo test --locked
+
+  package-preview:
+    name: Package Preview
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: Swatinem/rust-cache@v2
+
+      - name: Resolve published vault-core version
+        id: vault
+        shell: bash
+        run: |
+          VAULT_CORE_VERSION="$(python - <<'PY'
+          import json
+          import urllib.error
+          import urllib.request
+
+          try:
+              with urllib.request.urlopen("https://crates.io/api/v1/crates/peachnote-vault-core", timeout=30) as response:
+                  data = json.load(response)
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  print("")
+              else:
+                  raise
+          else:
+              version = data.get("crate", {}).get("max_stable_version") or data.get("crate", {}).get("newest_version") or ""
+              print(version)
+          PY
+          )"
+
+          echo "vault_core_version=${VAULT_CORE_VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Skip package preview summary
+        if: steps.vault.outputs.vault_core_version == ''
+        shell: bash
+        run: |
+          {
+            echo "Package preview is skipped because peachnote-vault-core is not published on crates.io yet."
+            echo "The lint and test jobs still validate quickpeach-plugin-host itself."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Rewrite manifest for crates.io preview
+        if: steps.vault.outputs.vault_core_version != ''
+        shell: bash
+        run: |
+          export VAULT_CORE_VERSION="${{ steps.vault.outputs.vault_core_version }}"
+          python - <<'PY'
+          import os
+          import pathlib
+          import re
+
+          path = pathlib.Path("Cargo.toml")
+          text = path.read_text(encoding="utf-8")
+          text, dep_count = re.subn(
+              r'peachnote-vault-core\s*=\s*(\{[^}]*\}|"[^"]+")',
+              f'peachnote-vault-core = "{os.environ["VAULT_CORE_VERSION"]}"',
+              text,
+              count=1,
+          )
+          if dep_count != 1:
+              raise SystemExit("Could not rewrite peachnote-vault-core dependency in Cargo.toml")
+          path.write_text(text, encoding="utf-8")
+          PY
+
+      - name: Refresh Cargo.lock
+        if: steps.vault.outputs.vault_core_version != ''
+        run: cargo update -p peachnote-vault-core --precise "${{ steps.vault.outputs.vault_core_version }}"
+
+      - name: Verify crates.io package
+        if: steps.vault.outputs.vault_core_version != ''
+        run: cargo publish --dry-run --allow-dirty --locked

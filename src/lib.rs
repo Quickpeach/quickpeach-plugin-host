@@ -9,9 +9,9 @@ pub mod storage;
 pub use bridge::{
     BridgeRequest, BridgeResponse, BuiltInView, CalendarConnectorAuthMode,
     CalendarConnectorDescriptor, CalendarConnectorKind, CalendarEvent, CalendarEventTime,
-    CalendarSource, CalendarSourceInput, CalendarSourceKind, CalendarSyncResult,
-    CryptoEnvelope, HostEffect, LauncherListItem, NetworkResponse, NoteSummary,
-    SearchProvider, StorageBlobRecord, ToastLevel,
+    CalendarSource, CalendarSourceInput, CalendarSourceKind, CalendarSyncResult, CryptoEnvelope,
+    HostEffect, LauncherListItem, NetworkResponse, NoteSummary, SearchProvider, StorageBlobRecord,
+    ToastLevel,
 };
 pub use discovery::{
     default_extensions_dir, discover_extensions, load_extension_dir, DiscoveryIssue,
@@ -29,10 +29,9 @@ pub use manifest::{
 pub use platform::{
     DashboardPosition, DashboardRegistry, DashboardWidgetDefinition, OverlayFamilyRegistration,
     OverlayRegistryPlan, PluginDescriptor, PluginHost, PluginLauncherContract,
-    PluginPlatformManifest, PluginProviderDescriptor, PluginSettingField,
-    PluginSettingFieldKind, PluginSettingsSection, PluginSetupContext, PluginSetupError,
-    PluginStyleAsset, PluginViewDefinition, RegistryError, SettingsRegistry, ViewMount,
-    ViewRegistry,
+    PluginPlatformManifest, PluginProviderDescriptor, PluginSettingField, PluginSettingFieldKind,
+    PluginSettingsSection, PluginSetupContext, PluginSetupError, PluginStyleAsset,
+    PluginViewDefinition, RegistryError, SettingsRegistry, ViewMount, ViewRegistry,
 };
 pub use runtime::{
     authorize_bridge_request, execute_command, CommandExecution, CommandOutcome, RuntimeError,
