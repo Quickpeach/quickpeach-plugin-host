@@ -1,6 +1,6 @@
 [package]
 name = "quickpeach-plugin-host"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "QuickPeach's typed plugin host runtime and import model"
 license = "MIT"
