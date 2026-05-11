@@ -11,10 +11,51 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Verify and package only; do not publish to crates.io or push a tag
+        description: Verify and package only; no tag, no release, no publish
         required: false
         default: true
         type: boolean
+      crates_io_ready_override:
+        description: Override CRATES_IO_READY for this run ("" = use env default)
+        required: false
+        default: ""
+        type: choice
+        options:
+          - ""
+          - "true"
+          - "false"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# All knobs live here. Edit this block to reconfigure the workflow — nothing
+# below this block should be hardcoded.
+# ─────────────────────────────────────────────────────────────────────────────
+env:
+  # Crate identity
+  CRATE_NAME: quickpeach-plugin-host
+
+  # Git / release shape
+  RELEASE_BRANCH: main
+  TAG_PREFIX: v
+  FALLBACK_VERSION: "0.1.0"
+
+  # Bootstrap toggle:
+  #   "false" → tag + GitHub release only, skip crates.io publish (pre-bootstrap)
+  #   "true"  → also publish to crates.io via OIDC Trusted Publishing
+  CRATES_IO_READY: "false"
+
+  # Sibling crate dependency.
+  # Pre-bootstrap (CRATES_IO_READY=false): keep the git dep so consumers can build from the tag.
+  # Post-bootstrap (CRATES_IO_READY=true): rewrite to the latest crates.io version.
+  SIBLING_CRATE_NAME: peachnote-vault-core
+
+  # Bot identity for the version-bump commit
+  BOT_NAME: "github-actions[bot]"
+  BOT_EMAIL: "41898282+github-actions[bot]@users.noreply.github.com"
+
+  # Quality gates
+  RUN_FMT_CHECK: "true"
+  RUN_CLIPPY: "true"
+  RUN_TESTS: "true"
 
 jobs:
   release:
@@ -24,6 +65,39 @@ jobs:
       contents: write
       id-token: write
     steps:
+      - name: Resolve effective config
+        id: cfg
+        shell: bash
+        run: |
+          OVERRIDE="${{ inputs.crates_io_ready_override }}"
+          if [[ -n "${OVERRIDE}" ]]; then
+            EFFECTIVE_READY="${OVERRIDE}"
+          else
+            EFFECTIVE_READY="${CRATES_IO_READY}"
+          fi
+
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            DRY_RUN="${{ inputs.dry_run }}"
+          else
+            DRY_RUN="false"
+          fi
+
+          echo "crates_io_ready=${EFFECTIVE_READY}" >> "$GITHUB_OUTPUT"
+          echo "dry_run=${DRY_RUN}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### Release config"
+            echo ""
+            echo "| Setting | Value |"
+            echo "|---|---|"
+            echo "| crate | \`${CRATE_NAME}\` |"
+            echo "| branch | \`${RELEASE_BRANCH}\` |"
+            echo "| tag prefix | \`${TAG_PREFIX}\` |"
+            echo "| sibling dep | \`${SIBLING_CRATE_NAME}\` |"
+            echo "| CRATES_IO_READY | \`${EFFECTIVE_READY}\` |"
+            echo "| dry run | \`${DRY_RUN}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Checkout
         uses: actions/checkout@v4
         with:
@@ -41,55 +115,67 @@ jobs:
         id: version
         shell: bash
         run: |
-          export CRATE_NAME="quickpeach-plugin-host"
-
-          # Determine baseline: latest git tag > crates.io published > Cargo.toml current
-          LAST_TAG="$(git tag --list 'v*' --sort=-version:refname | head -n1)"
+          LAST_TAG="$(git tag --list "${TAG_PREFIX}*" --sort=-version:refname | head -n1)"
 
           if [[ -n "${LAST_TAG}" ]]; then
-            BASELINE_VERSION="${LAST_TAG#v}"
+            BASELINE_VERSION="${LAST_TAG#${TAG_PREFIX}}"
+            BUMP="patch"
           else
             BASELINE_VERSION="$(python - <<'PY'
-          import json, os, pathlib, re, urllib.error, urllib.request
-
-          crate_name = os.environ["CRATE_NAME"]
+          import json, os, urllib.error, urllib.request
+          crate = os.environ["CRATE_NAME"]
           try:
-              with urllib.request.urlopen(f"https://crates.io/api/v1/crates/{crate_name}", timeout=30) as r:
-                  data = json.load(r)
-              version = data.get("crate", {}).get("max_stable_version") or data.get("crate", {}).get("newest_version") or ""
-              if version:
-                  print(version)
-                  raise SystemExit(0)
-          except urllib.error.HTTPError as exc:
-              if exc.code != 404:
-                  raise
-
-          text = pathlib.Path("Cargo.toml").read_text(encoding="utf-8")
-          match = re.search(r'(^|\n)\[package\][\s\S]*?\nversion = "([^"]+)"', text)
-          print(match.group(2) if match else "0.1.0")
-          PY
-          )"
-          fi
-
-          IFS='.' read -r major minor patch <<< "${BASELINE_VERSION}"
-          RELEASE_VERSION="${major}.${minor}.$((patch + 1))"
-          RELEASE_TAG="v${RELEASE_VERSION}"
-
-          VAULT_CORE_VERSION="$(python - <<'PY'
-          import json, urllib.error, urllib.request
-
-          try:
-              with urllib.request.urlopen("https://crates.io/api/v1/crates/peachnote-vault-core", timeout=30) as r:
+              with urllib.request.urlopen(f"https://crates.io/api/v1/crates/{crate}", timeout=30) as r:
                   data = json.load(r)
               print(data.get("crate", {}).get("max_stable_version") or data.get("crate", {}).get("newest_version") or "")
           except urllib.error.HTTPError as exc:
-              print("") if exc.code == 404 else (_ for _ in ()).throw(exc)
+              if exc.code == 404:
+                  print("")
+              else:
+                  raise
+          PY
+            )"
+            if [[ -n "${BASELINE_VERSION}" ]]; then
+              BUMP="patch"
+            else
+              BASELINE_VERSION="$(python - <<'PY'
+          import os, pathlib, re
+          text = pathlib.Path("Cargo.toml").read_text(encoding="utf-8")
+          m = re.search(r'(?:^|\n)\[package\][\s\S]*?\nversion = "([^"]+)"', text)
+          print(m.group(1) if m else os.environ["FALLBACK_VERSION"])
+          PY
+              )"
+              BUMP="none"
+            fi
+          fi
+
+          if [[ "${BUMP}" == "patch" ]]; then
+            IFS='.' read -r major minor patch <<< "${BASELINE_VERSION}"
+            RELEASE_VERSION="${major}.${minor}.$((patch + 1))"
+          else
+            RELEASE_VERSION="${BASELINE_VERSION}"
+          fi
+          RELEASE_TAG="${TAG_PREFIX}${RELEASE_VERSION}"
+
+          # Sibling latest crates.io version (only relevant when we will rewrite the dep)
+          SIBLING_VERSION="$(python - <<'PY'
+          import json, os, urllib.error, urllib.request
+          crate = os.environ["SIBLING_CRATE_NAME"]
+          try:
+              with urllib.request.urlopen(f"https://crates.io/api/v1/crates/{crate}", timeout=30) as r:
+                  data = json.load(r)
+              print(data.get("crate", {}).get("max_stable_version") or data.get("crate", {}).get("newest_version") or "")
+          except urllib.error.HTTPError as exc:
+              if exc.code == 404:
+                  print("")
+              else:
+                  raise
           PY
           )"
 
           echo "release_version=${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
-          echo "release_tag=${RELEASE_TAG}" >> "$GITHUB_OUTPUT"
-          echo "vault_core_version=${VAULT_CORE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "release_tag=${RELEASE_TAG}"         >> "$GITHUB_OUTPUT"
+          echo "sibling_version=${SIBLING_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Ensure tag does not already exist
         shell: bash
@@ -102,9 +188,11 @@ jobs:
 
       - name: Update Cargo.toml for release
         shell: bash
+        env:
+          REWRITE_SIBLING_DEP: ${{ steps.cfg.outputs.crates_io_ready }}
         run: |
           export RELEASE_VERSION="${{ steps.version.outputs.release_version }}"
-          export VAULT_CORE_VERSION="${{ steps.version.outputs.vault_core_version }}"
+          export SIBLING_VERSION="${{ steps.version.outputs.sibling_version }}"
           python - <<'PY'
           import os, pathlib, re
 
@@ -119,15 +207,18 @@ jobs:
           if n != 1:
               raise SystemExit("Could not update package version in Cargo.toml")
 
-          vault_core_version = os.environ.get("VAULT_CORE_VERSION", "").strip()
-          if vault_core_version:
-              text, n = re.subn(
-                  r'peachnote-vault-core\s*=\s*(\{[^}]*\}|"[^"]+")',
-                  f'peachnote-vault-core = "{vault_core_version}"',
-                  text, count=1,
-              )
-              if n != 1:
-                  raise SystemExit("Could not rewrite peachnote-vault-core dependency in Cargo.toml")
+          # Only rewrite the sibling git dep → crates.io version when bootstrap is complete.
+          if os.environ.get("REWRITE_SIBLING_DEP", "").lower() == "true":
+              sibling_name = os.environ["SIBLING_CRATE_NAME"]
+              sibling_version = os.environ.get("SIBLING_VERSION", "").strip()
+              if sibling_version:
+                  text, n = re.subn(
+                      rf'{re.escape(sibling_name)}\s*=\s*(\{{[^}}]*\}}|"[^"]+")',
+                      f'{sibling_name} = "{sibling_version}"',
+                      text, count=1,
+                  )
+                  if n != 1:
+                      raise SystemExit(f"Could not rewrite {sibling_name} dependency in Cargo.toml")
 
           path.write_text(text, encoding="utf-8")
           PY
@@ -136,52 +227,81 @@ jobs:
         run: cargo generate-lockfile
 
       - name: Check formatting
+        if: env.RUN_FMT_CHECK == 'true'
         run: cargo fmt --all --check
 
       - name: Lint
+        if: env.RUN_CLIPPY == 'true'
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       - name: Test
+        if: env.RUN_TESTS == 'true'
         run: cargo test
 
       - name: Package crate
         run: cargo package --allow-dirty
 
-      - name: Dry run summary
-        if: github.event_name == 'workflow_dispatch' && inputs.dry_run == true
+      # ─── Dry-run path ───────────────────────────────────────────────────────
+      - name: Dry-run summary
+        if: steps.cfg.outputs.dry_run == 'true'
         shell: bash
         run: |
-          echo "Prepared quickpeach-plugin-host ${{ steps.version.outputs.release_version }} (vault-core: ${{ steps.version.outputs.vault_core_version }})." >> "$GITHUB_STEP_SUMMARY"
-          echo "Dry run — nothing published or pushed." >> "$GITHUB_STEP_SUMMARY"
+          {
+            echo ""
+            echo "### Dry run"
+            echo ""
+            echo "Prepared \`${CRATE_NAME}\` ${{ steps.version.outputs.release_version }} (sibling \`${SIBLING_CRATE_NAME}\`: ${{ steps.version.outputs.sibling_version }}). Nothing tagged, released, or published."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Authenticate with crates.io
-        if: github.event_name == 'push' || inputs.dry_run != true
-        id: auth
-        uses: rust-lang/crates-io-auth-action@v1
-
-      - name: Publish crate
-        if: github.event_name == 'push' || inputs.dry_run != true
-        run: cargo publish --allow-dirty --token "${{ steps.auth.outputs.token }}"
-
+      # ─── Real-release path: tag + GitHub release ALWAYS run ─────────────────
       - name: Commit version bump and push tag
-        if: github.event_name == 'push' || inputs.dry_run != true
+        if: steps.cfg.outputs.dry_run != 'true'
         shell: bash
         run: |
           RELEASE_TAG="${{ steps.version.outputs.release_tag }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name  "${BOT_NAME}"
+          git config user.email "${BOT_EMAIL}"
           git add Cargo.toml Cargo.lock
           if ! git diff --cached --quiet; then
             git commit -m "release: ${RELEASE_TAG} [skip release]"
-            git push origin HEAD:main
+            git push origin "HEAD:${RELEASE_BRANCH}"
           fi
           git tag "${RELEASE_TAG}"
           git push origin "${RELEASE_TAG}"
 
       - name: Create GitHub release
-        if: github.event_name == 'push' || inputs.dry_run != true
+        if: steps.cfg.outputs.dry_run != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.version.outputs.release_tag }}
-          name: ${{ steps.version.outputs.release_tag }}
+          name:     ${{ steps.version.outputs.release_tag }}
           generate_release_notes: true
+
+      # ─── crates.io path: only when bootstrap is complete ────────────────────
+      - name: Authenticate with crates.io
+        if: steps.cfg.outputs.dry_run != 'true' && steps.cfg.outputs.crates_io_ready == 'true'
+        id: auth
+        uses: rust-lang/crates-io-auth-action@v1
+
+      - name: Publish crate
+        if: steps.cfg.outputs.dry_run != 'true' && steps.cfg.outputs.crates_io_ready == 'true'
+        run: cargo publish --allow-dirty --token "${{ steps.auth.outputs.token }}"
+
+      # ─── Pre-bootstrap notice ───────────────────────────────────────────────
+      - name: Bootstrap notice (CRATES_IO_READY=false)
+        if: steps.cfg.outputs.dry_run != 'true' && steps.cfg.outputs.crates_io_ready != 'true'
+        shell: bash
+        run: |
+          {
+            echo ""
+            echo "### crates.io publish skipped (pre-bootstrap)"
+            echo ""
+            echo "\`CRATES_IO_READY\` is **false**. Tag \`${{ steps.version.outputs.release_tag }}\` and the GitHub release were created so git-based consumers can pin to it. The \`${SIBLING_CRATE_NAME}\` dependency was kept as-is (git) and the crate was **not** published to crates.io."
+            echo ""
+            echo "**Manual bootstrap steps:**"
+            echo "1. Make sure \`${SIBLING_CRATE_NAME}\` is already on crates.io."
+            echo "2. Create a token at https://crates.io/settings/tokens scoped to \`${CRATE_NAME}\`."
+            echo "3. Run \`cargo publish --token <TOKEN>\` locally for the first publish."
+            echo "4. On https://crates.io/crates/${CRATE_NAME}/settings → Trusted Publishing, add a GitHub publisher with workflow \`release.yml\`."
+            echo "5. Flip \`CRATES_IO_READY: \"true\"\` in \`.github/workflows/release.yml\`."
+          } >> "$GITHUB_STEP_SUMMARY"
