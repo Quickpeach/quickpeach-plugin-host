@@ -58,6 +58,16 @@ pub struct NoteSummary {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteDetail {
+    pub id: String,
+    pub title: String,
+    pub content: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CalendarSourceKind {
@@ -249,6 +259,19 @@ pub enum BridgeRequest {
         #[serde(default)]
         content: Option<String>,
     },
+    NoteGet {
+        note_id: String,
+    },
+    NoteUpdate {
+        note_id: String,
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        content: Option<String>,
+    },
+    NoteDelete {
+        note_id: String,
+    },
     ClipboardRead,
     ClipboardWrite {
         text: String,
@@ -404,8 +427,12 @@ impl BridgeRequest {
             Self::NetworkFetch { .. } | Self::ProviderFetch { .. } => {
                 Some(ExtensionPermission::NetworkFetch)
             }
-            Self::OpenNote { .. } | Self::ListNotes => Some(ExtensionPermission::NotesRead),
-            Self::CreateNote { .. } => Some(ExtensionPermission::NotesWrite),
+            Self::OpenNote { .. } | Self::ListNotes | Self::NoteGet { .. } => {
+                Some(ExtensionPermission::NotesRead)
+            }
+            Self::CreateNote { .. }
+            | Self::NoteUpdate { .. }
+            | Self::NoteDelete { .. } => Some(ExtensionPermission::NotesWrite),
             Self::ClipboardRead => Some(ExtensionPermission::ClipboardRead),
             Self::ClipboardWrite { .. } => Some(ExtensionPermission::ClipboardWrite),
             Self::ClipboardHistory { .. } => Some(ExtensionPermission::ClipboardHistory),
@@ -528,6 +555,9 @@ pub enum BridgeResponse {
     CreatedNote {
         note_id: String,
     },
+    NoteDetail {
+        note: NoteDetail,
+    },
     OpenedWindow {
         window_label: String,
     },
@@ -591,6 +621,41 @@ mod tests {
         assert_eq!(
             BridgeRequest::SecretKeys { prefix: None }.required_permission(),
             Some(ExtensionPermission::SecretsRead)
+        );
+    }
+
+    #[test]
+    fn note_get_requires_notes_read_permission() {
+        assert_eq!(
+            BridgeRequest::NoteGet {
+                note_id: "note-1".to_string(),
+            }
+            .required_permission(),
+            Some(ExtensionPermission::NotesRead)
+        );
+    }
+
+    #[test]
+    fn note_update_requires_notes_write_permission() {
+        assert_eq!(
+            BridgeRequest::NoteUpdate {
+                note_id: "note-1".to_string(),
+                title: Some("Updated".to_string()),
+                content: None,
+            }
+            .required_permission(),
+            Some(ExtensionPermission::NotesWrite)
+        );
+    }
+
+    #[test]
+    fn note_delete_requires_notes_write_permission() {
+        assert_eq!(
+            BridgeRequest::NoteDelete {
+                note_id: "note-1".to_string(),
+            }
+            .required_permission(),
+            Some(ExtensionPermission::NotesWrite)
         );
     }
 
