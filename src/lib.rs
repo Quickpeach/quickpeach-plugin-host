@@ -10,8 +10,8 @@ pub use bridge::{
     BridgeRequest, BridgeResponse, BuiltInView, CalendarConnectorAuthMode,
     CalendarConnectorDescriptor, CalendarConnectorKind, CalendarEvent, CalendarEventTime,
     CalendarSource, CalendarSourceInput, CalendarSourceKind, CalendarSyncResult, CryptoEnvelope,
-    HostEffect, LauncherListItem, NetworkResponse, NoteSummary, SearchProvider, StorageBlobRecord,
-    ToastLevel,
+    HostEffect, LauncherListItem, NetworkResponse, NoteDetail, NoteSummary, SearchProvider,
+    StorageBlobRecord, ToastLevel,
 };
 pub use discovery::{
     default_extensions_dir, discover_extensions, load_extension_dir, DiscoveryIssue,
